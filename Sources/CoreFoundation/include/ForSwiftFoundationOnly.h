@@ -37,7 +37,8 @@
 #define WIN32_LEAN_AND_MEAN
 #define _CRT_NONSTDC_NO_DEPRECATE
 #include <Windows.h>
-#else
+#elif __has_include(<fts.h>)
+// musl has no fts.h unless musl-fts is installed; CF itself does not use it.
 #include <fts.h>
 #endif
 #if __has_include(<unistd.h>)

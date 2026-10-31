@@ -44,6 +44,9 @@ jobs:
               "-DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=address,undefined"
             extra_packages: libclang-rt-18-dev
             env_extra: ASAN_OPTIONS=detect_leaks=0
+            consumer_cmake_args: >-
+              "-DCMAKE_C_FLAGS=-fsanitize=address,undefined"
+              "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined"
     steps:
       - uses: actions/checkout@v4
 
@@ -83,7 +86,7 @@ jobs:
           target_link_libraries(app PRIVATE CoreFoundation::CoreFoundation)
           CMAKE
           cmake -S consumer -B consumer/build -G Ninja -DCMAKE_C_COMPILER=clang \
-            -DCMAKE_PREFIX_PATH=${{ github.workspace }}/prefix
+            -DCMAKE_PREFIX_PATH=${{ github.workspace }}/prefix ${{ matrix.consumer_cmake_args }}
           cmake --build consumer/build
           ${{ matrix.env_extra }} LD_LIBRARY_PATH=${{ github.workspace }}/prefix/lib consumer/build/app
 
@@ -123,19 +126,32 @@ jobs:
   # Distributions that package libdispatch, in containers.
   #---------------------------------------------------------------------------
   debian:
-    name: debian-bookworm / packaged libdispatch
+    name: debian-${{ matrix.release }} / packaged libdispatch if available
     runs-on: ubuntu-24.04
-    container: debian:bookworm
+    container: debian:${{ matrix.release }}
+    strategy:
+      fail-fast: false
+      matrix:
+        release: [bookworm, trixie]
     steps:
       - name: Install dependencies
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            clang ninja-build cmake git ca-certificates libicu-dev libdispatch-dev libblocksruntime-dev
+            clang ninja-build cmake git ca-certificates libicu-dev libblocksruntime-dev
+          # Not every Debian release packages swift-corelibs-libdispatch.
+          if apt-get install -y --no-install-recommends libdispatch-dev; then
+            echo "CF_FETCH=OFF" >> "$GITHUB_ENV"
+            echo "using the packaged libdispatch"
+          else
+            echo "CF_FETCH=ON" >> "$GITHUB_ENV"
+            echo "no libdispatch-dev on this release; it will be fetched"
+          fi
       - uses: actions/checkout@v4
       - name: Configure, build, test, install
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_BUILD_TYPE=Release \
+          cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_BUILD_TYPE=Release -DCF_FETCH_LIBDISPATCH=$CF_FETCH \
             -DCMAKE_INSTALL_PREFIX=$PWD/prefix
           cmake --build build
           ctest --test-dir build --output-on-failure
@@ -148,7 +164,7 @@ jobs:
     steps:
       - name: Install dependencies
         run: |
-          dnf install -y clang ninja-build cmake git libicu-devel libdispatch-devel libblocksruntime-devel
+          dnf install -y clang ninja-build cmake git libicu-devel libdispatch-devel
       - uses: actions/checkout@v4
       - name: Configure, build, test, install
         run: |
@@ -159,18 +175,17 @@ jobs:
           cmake --install build
 
   alpine:
-    name: alpine (musl) / fetched libdispatch, vendored Blocks
+    name: alpine (musl) / packaged libdispatch
     runs-on: ubuntu-24.04
     container: alpine:latest
     steps:
       - name: Install dependencies
         run: |
-          apk add --no-cache bash build-base clang clang-dev lld cmake samurai git icu-dev icu-data-full linux-headers tzdata
+          apk add --no-cache bash build-base clang cmake samurai git icu-dev icu-data-full libdispatch-dev linux-headers tzdata
       - uses: actions/checkout@v4
       - name: Configure, build, test
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
-            -DCMAKE_BUILD_TYPE=Release -DCF_FETCH_LIBDISPATCH=ON
+          cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_BUILD_TYPE=Release
           cmake --build build
           ctest --test-dir build --output-on-failure
 
