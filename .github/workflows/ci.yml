@@ -63,8 +63,9 @@ jobs:
           int main(void) {
               CFStringRef s = CFStringCreateWithFormat(NULL, NULL, CFSTR("%d bottles"), 99);
               CFShow(s);
+              CFIndex length = CFStringGetLength(s);
               CFRelease(s);
-              return CFStringGetLength(s) == 10 ? 0 : 1;
+              return length == 10 ? 0 : 1;
           }
           C
           cmake -S consumer -B consumer/build -G Ninja -DCMAKE_C_COMPILER=clang \

@@ -408,28 +408,41 @@ config and pkg-config file, `Tests/C/smoke.c` and `Tests/C/headers.c`, and a
 GitHub Actions workflow.
 
 Verified in a clean Ubuntu 24.04 container with clang 18, ICU 74, system
-BlocksRuntime, libxml2 2.9 and curl 8.5:
+BlocksRuntime, libxml2 2.9, curl 8.5 and swift-corelibs-libdispatch
+swift-6.1-RELEASE built in-tree through `CF_FETCH_LIBDISPATCH=ON`:
 
-* shared Release build, static Release build with both interface libraries,
-  Debug build with the vendored Blocks runtime, and `CF_SWIFT_RUNTIME=ON`
-  (compile and link of the library) all build with zero warnings in CF proper;
+* shared Release, static Release with both interface libraries, Debug with the
+  vendored Blocks runtime, and an AddressSanitizer + UndefinedBehaviorSanitizer
+  Debug build all compile with zero warnings in CF proper, and
+  `CF_SWIFT_RUNTIME=ON` still compiles and links the library;
+* `ctest` passes in every configuration: `cf_smoke` (58 checks covering the
+  runtime, collections, property lists, ICU formatters, time zones, URLs,
+  UUIDs, preferences, the run loop and the restored helpers) and
+  `cf_headers`, with no sanitizer findings;
 * the shared library's undefined symbols are only libdispatch, ICU,
-  BlocksRuntime and libc; no `uuid_*` symbol is exported;
-* install + `find_package(CoreFoundation)` from a separate project works for
-  both the shared and the static install, and a consumer TU compiles against
-  the installed headers without `-fblocks`.
+  BlocksRuntime and libc, and no `uuid_*` symbol is exported;
+* install + `find_package(CoreFoundation)` from a separate project builds and
+  runs a consumer against both the shared and the static install (the static
+  consumer has no runtime dependency on CoreFoundation or libdispatch), and
+  the pkg-config file resolves with and without `--static`.
 
-Not verified here: actually running the tests. The container could not build
-libdispatch (the sandbox refused to execute the external build), so the
-library was linked against a header-only stand-in and the test executables
-stop at the link step with only `dispatch_*` symbols unresolved. The CI
-workflow builds libdispatch via `CF_FETCH_LIBDISPATCH=ON` and runs `ctest`;
-its first run is the acceptance test for this phase.
+The GitHub Actions workflow runs the shared, static and vendored-Blocks
+configurations plus the Swift-mode compile check on every push; each job
+fetches and builds libdispatch, builds, tests, installs and builds and runs a
+consumer project in under a minute.
+
+Known sanitizer finding: with clang's `-fsanitize=undefined` (which since
+clang 17 includes `-fsanitize=function`), `CFBasicHash.c` trips the
+function-pointer type check, because the hash table stores its callbacks as
+generic pointers and calls `CFHash(CFTypeRef)` through a
+`CFHashCode (*)(void *)`. This is upstream code, benign on every ABI CF
+supports, and appears on the first dictionary insert. Sanitizer runs need
+`-fno-sanitize=function` until the callback casts are tidied (phase 2).
 
 Phase 2, "it is a good citizen": S9, header self-containment test for every
-installed header, consumer tests (installed and FetchContent) in CI, a CI
-matrix with Debian (packaged libdispatch), Fedora, Alpine (musl), static and
-sanitizer jobs, interface-library job.
+installed header, a FetchContent consumer test in CI, a CI matrix with Debian
+(packaged libdispatch), Fedora, Alpine (musl) and a sanitizer job, fix the
+`CFBasicHash` callback casts so `-fsanitize=function` is clean.
 
 Phase 3, "polish": S10 hidden visibility with an exports audit, S11 ISO8601
 restore, Windows and FreeBSD jobs, release tagging, first upstream sync with
