@@ -421,70 +421,75 @@ CF_INLINE Boolean __CFBasicHashHasHashCache(CFConstBasicHashRef ht) {
 #endif
 }
 
+// The callbacks stored in the table come from the public collection callback
+// structs (CFDictionaryKeyCallBacks and friends), whose functions take and
+// return `const void *`. Invoking them through exactly those signatures keeps
+// the calls well-defined (and quiet under -fsanitize=function); the uintptr_t
+// representation is only used for storage in the table.
 CF_INLINE uintptr_t __CFBasicHashImportValue(CFConstBasicHashRef ht, uintptr_t stack_value) {
-    void * (*func)(CFAllocatorRef, void *) = (void * (*)(CFAllocatorRef, void *))CFBasicHashGetPtrAtIndex(ht->bits.__vret);
+    const void * (*func)(CFAllocatorRef, const void *) = (const void * (*)(CFAllocatorRef, const void *))CFBasicHashGetPtrAtIndex(ht->bits.__vret);
     if (!func || ht->bits.null_rc) return stack_value;
     CFAllocatorRef alloc = __CFGetAllocator(ht);
-    return (uintptr_t)func(alloc, (void *)stack_value);
+    return (uintptr_t)func(alloc, (const void *)stack_value);
 }
 
 CF_INLINE uintptr_t __CFBasicHashImportKey(CFConstBasicHashRef ht, uintptr_t stack_key) {
-    void * (*func)(CFAllocatorRef, void *) = (void * (*)(CFAllocatorRef, void *))CFBasicHashGetPtrAtIndex(ht->bits.__kret);
+    const void * (*func)(CFAllocatorRef, const void *) = (const void * (*)(CFAllocatorRef, const void *))CFBasicHashGetPtrAtIndex(ht->bits.__kret);
     if (!func || ht->bits.null_rc) return stack_key;
     CFAllocatorRef alloc = __CFGetAllocator(ht);
-    return (uintptr_t)func(alloc, (void *)stack_key);
+    return (uintptr_t)func(alloc, (const void *)stack_key);
 }
 
 CF_INLINE void __CFBasicHashEjectValue(CFConstBasicHashRef ht, uintptr_t stack_value) {
-    void (*func)(CFAllocatorRef, void *) = (void (*)(CFAllocatorRef, void *))CFBasicHashGetPtrAtIndex(ht->bits.__vrel);
+    void (*func)(CFAllocatorRef, const void *) = (void (*)(CFAllocatorRef, const void *))CFBasicHashGetPtrAtIndex(ht->bits.__vrel);
     if (!func || ht->bits.null_rc) return;
     CFAllocatorRef alloc = __CFGetAllocator(ht);
-    func(alloc, (void *)stack_value);
+    func(alloc, (const void *)stack_value);
 }
 
 CF_INLINE void __CFBasicHashEjectKey(CFConstBasicHashRef ht, uintptr_t stack_key) {
-    void (*func)(CFAllocatorRef, void *) = (void (*)(CFAllocatorRef, void *))CFBasicHashGetPtrAtIndex(ht->bits.__krel);
+    void (*func)(CFAllocatorRef, const void *) = (void (*)(CFAllocatorRef, const void *))CFBasicHashGetPtrAtIndex(ht->bits.__krel);
     if (!func || ht->bits.null_rc) return;
     CFAllocatorRef alloc = __CFGetAllocator(ht);
-    func(alloc, (void *)stack_key);
+    func(alloc, (const void *)stack_key);
 }
 
 CF_INLINE CFStringRef __CFBasicHashDescValue(CFConstBasicHashRef ht, uintptr_t stack_value) CF_RETURNS_RETAINED {
-    CFStringRef (*func)(void *) = (CFStringRef (*)(void *))CFBasicHashGetPtrAtIndex(ht->bits.__vdes);
+    CFStringRef (*func)(const void *) = (CFStringRef (*)(const void *))CFBasicHashGetPtrAtIndex(ht->bits.__vdes);
     if (!func) return CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("<%p>"), (void *)stack_value);
-    return func((void *)stack_value);
+    return func((const void *)stack_value);
 }
 
 CF_INLINE CFStringRef __CFBasicHashDescKey(CFConstBasicHashRef ht, uintptr_t stack_key) CF_RETURNS_RETAINED {
-    CFStringRef (*func)(void *) = (CFStringRef (*)(void *))CFBasicHashGetPtrAtIndex(ht->bits.__kdes);
+    CFStringRef (*func)(const void *) = (CFStringRef (*)(const void *))CFBasicHashGetPtrAtIndex(ht->bits.__kdes);
     if (!func) return CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("<%p>"), (void *)stack_key);
-    return func((void *)stack_key);
+    return func((const void *)stack_key);
 }
 
 CF_INLINE Boolean __CFBasicHashTestEqualValue(CFConstBasicHashRef ht, uintptr_t stack_value_a, uintptr_t stack_value_b) {
-    Boolean (*func)(void *, void *) = (Boolean (*)(void *, void *))CFBasicHashGetPtrAtIndex(ht->bits.__vequ);
+    Boolean (*func)(const void *, const void *) = (Boolean (*)(const void *, const void *))CFBasicHashGetPtrAtIndex(ht->bits.__vequ);
     if (!func) return (stack_value_a == stack_value_b);
-    return func((void *)stack_value_a, (void *)stack_value_b);
+    return func((const void *)stack_value_a, (const void *)stack_value_b);
 }
 
 CF_INLINE Boolean __CFBasicHashTestEqualKey(CFConstBasicHashRef ht, uintptr_t in_coll_key, uintptr_t stack_key) {
     COCOA_HASHTABLE_TEST_EQUAL(ht, in_coll_key, stack_key);
-    Boolean (*func)(void *, void *) = (Boolean (*)(void *, void *))CFBasicHashGetPtrAtIndex(ht->bits.__kequ);
+    Boolean (*func)(const void *, const void *) = (Boolean (*)(const void *, const void *))CFBasicHashGetPtrAtIndex(ht->bits.__kequ);
     if (!func) return (in_coll_key == stack_key);
-    return func((void *)in_coll_key, (void *)stack_key);
+    return func((const void *)in_coll_key, (const void *)stack_key);
 }
 
 CF_INLINE CFHashCode __CFBasicHashHashKey(CFConstBasicHashRef ht, uintptr_t stack_key) {
-    CFHashCode (*func)(void *) = (CFHashCode (*)(void *))CFBasicHashGetPtrAtIndex(ht->bits.__khas);
-    CFHashCode hash_code = func ? func((void *)stack_key) : stack_key;
+    CFHashCode (*func)(const void *) = (CFHashCode (*)(const void *))CFBasicHashGetPtrAtIndex(ht->bits.__khas);
+    CFHashCode hash_code = func ? func((const void *)stack_key) : stack_key;
     COCOA_HASHTABLE_HASH_KEY(ht, stack_key, hash_code);
     return hash_code;
 }
 
 CF_INLINE uintptr_t __CFBasicHashGetIndirectKey(CFConstBasicHashRef ht, uintptr_t coll_key) {
-    void * (*func)(void *) = (void * (*)(void *))CFBasicHashGetPtrAtIndex(ht->bits.__kget);
+    const void * (*func)(const void *) = (const void * (*)(const void *))CFBasicHashGetPtrAtIndex(ht->bits.__kget);
     if (!func) return coll_key;
-    return (uintptr_t)func((void *)coll_key);
+    return (uintptr_t)func((const void *)coll_key);
 }
 
 CF_INLINE CFBasicHashValue *__CFBasicHashGetValues(CFConstBasicHashRef ht) {

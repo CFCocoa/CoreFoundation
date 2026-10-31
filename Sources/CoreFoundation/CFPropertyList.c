@@ -557,6 +557,12 @@ static void _XMLPlistAppendDataUsingBase64(CFMutableDataRef mData, CFDataRef inp
 
 extern CFStringRef __CFNumberCopyFormattingDescriptionAsFloat64(CFTypeRef cf);
 
+// CFStringCompare takes CFStringCompareFlags, not a void * context, so give
+// the sort a comparator with exactly the CFComparatorFunction signature.
+static CFComparisonResult __CFPlistCompareKeys(const void *v1, const void *v2, void *context) {
+    return CFStringCompare((CFStringRef)v1, (CFStringRef)v2, 0);
+}
+
 static void _CFAppendXML0(CFTypeRef object, UInt32 indentation, CFMutableDataRef xmlString) {
     UInt32 typeID = CFGetTypeID(object);
     _appendIndents(indentation, xmlString);
@@ -632,7 +638,7 @@ static void _CFAppendXML0(CFTypeRef object, UInt32 indentation, CFMutableDataRef
         CFDictionaryGetKeysAndValues((CFDictionaryRef)object, keys, NULL);
         keyArray = CFArrayCreateMutable(kCFAllocatorSystemDefault, count, &kCFTypeArrayCallBacks);
         CFArrayReplaceValues(keyArray, CFRangeMake(0, 0), keys, count);
-        CFArraySortValues(keyArray, CFRangeMake(0, count), (CFComparatorFunction)CFStringCompare, NULL);
+        CFArraySortValues(keyArray, CFRangeMake(0, count), __CFPlistCompareKeys, NULL);
         CFArrayGetValues(keyArray, CFRangeMake(0, count), keys);
         CFRelease(keyArray);
         for (i = 0; i < count; i ++) {

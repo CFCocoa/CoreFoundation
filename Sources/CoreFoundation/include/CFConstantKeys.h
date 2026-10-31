@@ -8,6 +8,9 @@
 	See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
  */
 
+#if !defined(__COREFOUNDATION_CFCONSTANTKEYS__)
+#define __COREFOUNDATION_CFCONSTANTKEYS__ 1
+
 /*
  This file is for the use of the CoreFoundation project only.
  */
@@ -125,4 +128,4 @@ CF_EXPORT CFStringRef const kCFCalendarIdentifierCoptic;
 CF_EXPORT CFStringRef const kCFCalendarIdentifierEthiopicAmeteMihret;
 CF_EXPORT CFStringRef const kCFCalendarIdentifierEthiopicAmeteAlem;
 
-
+#endif /* ! __COREFOUNDATION_CFCONSTANTKEYS__ */

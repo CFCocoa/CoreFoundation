@@ -393,7 +393,8 @@ struct _tcompareContext {
     void *context;
 };
 
-static CFComparisonResult __CFTreeCompareValues(const void *v1, const void *v2, struct _tcompareContext *context) {
+static CFComparisonResult __CFTreeCompareValues(const void *v1, const void *v2, void *ctx) {
+    struct _tcompareContext *context = (struct _tcompareContext *)ctx;
     const void **val1 = (const void **)v1;
     const void **val2 = (const void **)v2;
     return (CFComparisonResult)(INVOKE_CALLBACK3(context->func, *val1, *val2, context->context));
@@ -420,7 +421,7 @@ void CFTreeSortChildren(CFTreeRef tree, CFComparatorFunction comparator, void *c
 
         ctx.func = comparator;
         ctx.context = context;
-        CFQSortArray(list, children, sizeof(CFTreeRef), (CFComparatorFunction)__CFTreeCompareValues, &ctx);
+        CFQSortArray(list, children, sizeof(CFTreeRef), __CFTreeCompareValues, &ctx);
 
         *((void **)&tree->_child) = list[0];
         for (idx = 1; idx < children; idx++) {

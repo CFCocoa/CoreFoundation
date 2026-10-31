@@ -921,7 +921,10 @@ struct _acompareContext {
     void *context;
 };
 
-static CFComparisonResult __CFArrayCompareValues(const void *v1, const void *v2, struct _acompareContext *context) {
+// Takes `void *` for its context so that it has exactly the CFComparatorFunction
+// type it is invoked through.
+static CFComparisonResult __CFArrayCompareValues(const void *v1, const void *v2, void *ctx) {
+    struct _acompareContext *context = (struct _acompareContext *)ctx;
     const void **val1 = (const void **)v1;
     const void **val2 = (const void **)v2;
     return (CFComparisonResult)(INVOKE_CALLBACK3(context->func, *val1, *val2, context->context));
@@ -953,7 +956,7 @@ CF_PRIVATE void _CFArraySortValues(CFMutableArrayRef array, CFComparatorFunction
     struct _acompareContext ctx;
     ctx.func = comparator;
     ctx.context = context;
-    CFQSortArray(values, range.length, sizeof(void *), (CFComparatorFunction)__CFArrayCompareValues, &ctx);
+    CFQSortArray(values, range.length, sizeof(void *), __CFArrayCompareValues, &ctx);
     CFArrayReplaceValues(array, range, values, range.length);
     if (values != buffer) CFAllocatorDeallocate(kCFAllocatorSystemDefault, values);
 }
@@ -995,7 +998,7 @@ void CFArraySortValues(CFMutableArrayRef array, CFRange range, CFComparatorFunct
     struct _acompareContext ctx;
     ctx.func = comparator;
     ctx.context = context;
-    CFQSortArray(values, range.length, sizeof(void *), (CFComparatorFunction)__CFArrayCompareValues, &ctx);
+    CFQSortArray(values, range.length, sizeof(void *), __CFArrayCompareValues, &ctx);
     if (!immutable) CFArrayReplaceValues(array, range, values, range.length);
     if (values != buffer) CFAllocatorDeallocate(kCFAllocatorSystemDefault, values);
 }

@@ -7,6 +7,9 @@
  See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
  */
 
+#if !defined(__COREFOUNDATION_CFPROPERTYLIST_PRIVATE__)
+#define __COREFOUNDATION_CFPROPERTYLIST_PRIVATE__ 1
+
 #include "CFPropertyList.h"
 
 // this is only allowed the first 8 bits
@@ -17,3 +20,5 @@ typedef CF_OPTIONS(CFOptionFlags, CFPropertyListSupportedFormats) {
 };
 
 #define kCFPropertyListMutabilityMask 0xFF  // first 8 bits
+
+#endif /* ! __COREFOUNDATION_CFPROPERTYLIST_PRIVATE__ */

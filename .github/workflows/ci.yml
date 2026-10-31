@@ -5,9 +5,23 @@ on:
     branches: ["**"]
   pull_request:
 
+env:
+  CONSUMER_MAIN: |
+    #include <CoreFoundation/CoreFoundation.h>
+    int main(void) {
+        CFStringRef s = CFStringCreateWithFormat(NULL, NULL, CFSTR("%d bottles"), 99);
+        CFShow(s);
+        CFIndex length = CFStringGetLength(s);
+        CFRelease(s);
+        return length == 10 ? 0 : 1;
+    }
+
 jobs:
-  linux:
-    name: ${{ matrix.name }}
+  #---------------------------------------------------------------------------
+  # Ubuntu: no packaged libdispatch, so it is fetched and built in-tree.
+  #---------------------------------------------------------------------------
+  ubuntu:
+    name: ubuntu-24.04 / ${{ matrix.name }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -20,6 +34,16 @@ jobs:
           - name: shared + interface libraries + vendored Blocks
             cmake_args: -DCF_BUILD_XML_INTERFACE=ON -DCF_BUILD_URLSESSION_INTERFACE=ON -DCF_BLOCKS_RUNTIME=vendored
             extra_packages: libxml2-dev libcurl4-openssl-dev
+          - name: ASan + UBSan (Debug)
+            # -fsanitize=function is left out: libdispatch's own vtable calls trip it.
+            cmake_args: >-
+              -DCMAKE_BUILD_TYPE=Debug
+              "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-sanitize=function -fno-sanitize-recover=undefined"
+              "-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-sanitize=function"
+              "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined"
+              "-DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=address,undefined"
+            extra_packages: libclang-rt-18-dev
+            env_extra: ASAN_OPTIONS=detect_leaks=0
     steps:
       - uses: actions/checkout@v4
 
@@ -30,7 +54,6 @@ jobs:
             clang ninja-build cmake libicu-dev libblocksruntime-dev ${{ matrix.extra_packages }}
 
       - name: Configure
-        # Ubuntu does not package libdispatch; build swift-corelibs-libdispatch in-tree.
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
@@ -43,7 +66,7 @@ jobs:
         run: cmake --build build
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: ${{ matrix.env_extra }} ctest --test-dir build --output-on-failure
 
       - name: Install
         run: cmake --install build
@@ -51,6 +74,7 @@ jobs:
       - name: Consumer project against the installed package
         run: |
           mkdir -p consumer
+          printf '%s\n' "$CONSUMER_MAIN" > consumer/main.c
           cat > consumer/CMakeLists.txt <<'CMAKE'
           cmake_minimum_required(VERSION 3.20)
           project(cf_consumer C)
@@ -58,23 +82,103 @@ jobs:
           add_executable(app main.c)
           target_link_libraries(app PRIVATE CoreFoundation::CoreFoundation)
           CMAKE
-          cat > consumer/main.c <<'C'
-          #include <CoreFoundation/CoreFoundation.h>
-          int main(void) {
-              CFStringRef s = CFStringCreateWithFormat(NULL, NULL, CFSTR("%d bottles"), 99);
-              CFShow(s);
-              CFIndex length = CFStringGetLength(s);
-              CFRelease(s);
-              return length == 10 ? 0 : 1;
-          }
-          C
           cmake -S consumer -B consumer/build -G Ninja -DCMAKE_C_COMPILER=clang \
             -DCMAKE_PREFIX_PATH=${{ github.workspace }}/prefix
           cmake --build consumer/build
-          LD_LIBRARY_PATH=${{ github.workspace }}/prefix/lib consumer/build/app
+          ${{ matrix.env_extra }} LD_LIBRARY_PATH=${{ github.workspace }}/prefix/lib consumer/build/app
 
+  #---------------------------------------------------------------------------
+  # A project that vendors CoreFoundation with FetchContent.
+  #---------------------------------------------------------------------------
+  fetchcontent-consumer:
+    name: ubuntu-24.04 / FetchContent consumer
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: CoreFoundation
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang ninja-build cmake libicu-dev libblocksruntime-dev
+      - name: Build and run a consumer that fetches CoreFoundation
+        run: |
+          mkdir -p consumer
+          printf '%s\n' "$CONSUMER_MAIN" > consumer/main.c
+          cat > consumer/CMakeLists.txt <<'CMAKE'
+          cmake_minimum_required(VERSION 3.20)
+          project(cf_fetch_consumer C CXX)
+          include(FetchContent)
+          set(CF_FETCH_LIBDISPATCH ON CACHE BOOL "" FORCE)
+          FetchContent_Declare(CoreFoundation SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../CoreFoundation)
+          FetchContent_MakeAvailable(CoreFoundation)
+          add_executable(app main.c)
+          target_link_libraries(app PRIVATE CoreFoundation::CoreFoundation)
+          CMAKE
+          cmake -S consumer -B consumer/build -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+          cmake --build consumer/build
+          consumer/build/app
+
+  #---------------------------------------------------------------------------
+  # Distributions that package libdispatch, in containers.
+  #---------------------------------------------------------------------------
+  debian:
+    name: debian-bookworm / packaged libdispatch
+    runs-on: ubuntu-24.04
+    container: debian:bookworm
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            clang ninja-build cmake git ca-certificates libicu-dev libdispatch-dev libblocksruntime-dev
+      - uses: actions/checkout@v4
+      - name: Configure, build, test, install
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=$PWD/prefix
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+          cmake --install build
+
+  fedora:
+    name: fedora / packaged libdispatch
+    runs-on: ubuntu-24.04
+    container: fedora:latest
+    steps:
+      - name: Install dependencies
+        run: |
+          dnf install -y clang ninja-build cmake git libicu-devel libdispatch-devel libblocksruntime-devel
+      - uses: actions/checkout@v4
+      - name: Configure, build, test, install
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=$PWD/prefix
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+          cmake --install build
+
+  alpine:
+    name: alpine (musl) / fetched libdispatch, vendored Blocks
+    runs-on: ubuntu-24.04
+    container: alpine:latest
+    steps:
+      - name: Install dependencies
+        run: |
+          apk add --no-cache bash build-base clang clang-dev lld cmake samurai git icu-dev icu-data-full linux-headers tzdata
+      - uses: actions/checkout@v4
+      - name: Configure, build, test
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_BUILD_TYPE=Release -DCF_FETCH_LIBDISPATCH=ON
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+
+  #---------------------------------------------------------------------------
+  # The Swift runtime mode must keep compiling.
+  #---------------------------------------------------------------------------
   swift-runtime-mode-compiles:
-    name: CF_SWIFT_RUNTIME=ON still compiles
+    name: ubuntu-24.04 / CF_SWIFT_RUNTIME=ON compiles
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

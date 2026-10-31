@@ -15,6 +15,7 @@
 #define __COREFOUNDATION_CFLOCKING_H__ 1
 
 #include "CFTargetConditionals.h"
+#include "CFBase.h"
 
 #if TARGET_OS_MAC
 

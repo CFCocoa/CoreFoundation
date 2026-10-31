@@ -260,9 +260,10 @@ a bug fix in the C path or a guard change; none alters Swift-mode behaviour.
 | S6 | `include/CoreFoundation.h` | Includes `ForSwiftFoundationOnly.h` only `#if DEPLOYMENT_RUNTIME_SWIFT`, so C consumers do not see the Swift bridge structs (and compile without `-fblocks`). | 1.7 |
 | S7 | `include/CFCalendarPriv.h`, `include/ForSwiftFoundationOnly.h` | Block-typed declarations guarded by `#if __BLOCKS__`, as the rest of the public headers already are. | consumers without `-fblocks` |
 | S8 | `internalInclude/uuid.h` | Vendored `uuid_*` functions get hidden visibility. | libuuid interposition |
-| S9 | the other headers in 1.7 | Missing includes in `CFOverflow.h`, `CFLocking.h`, `CFDateComponents.h`, `CFBundle_BinaryTypes.h`; move `CFStringEncodingConverterPriv.h` and `CFStringEncodingDatabase.h` to `internalInclude/`. **Not done yet** (phase 2). | header self-containment |
+| S9 | the other headers in 1.7 | Missing includes in `CFOverflow.h`, `CFLocking.h`, `CFDateComponents.h`, `CFBundle_BinaryTypes.h`; include guards for `CFPropertyList_Private.h` and `CFConstantKeys.h`; `CFStringEncodingConverterPriv.h` and `CFStringEncodingDatabase.h` moved to `internalInclude/`. | header self-containment, enforced by `Tests/C` |
 | S10 | `include/CFBase.h` | `CF_EXPORT` with `visibility("default")` on ELF so the library can use `-fvisibility=hidden`. **Not done yet** (phase 3). | smaller export table |
 | S11 | `include/CFDateFormatter.h`, `CFDateFormatter.c` | Restore `CFISO8601DateFormatOptions` and `CFDateFormatterCreateISO8601Formatter` from 5.10.1. **Not done yet** (phase 3). | only C API lost since 5.10.1 |
+| S13 | `CFBasicHash.c`, `CFArray.c`, `CFTree.c`, `CFPropertyList.c` | Callbacks are invoked through the public collection callback signatures (`const void *`), and the internal sort comparators have exactly the `CFComparatorFunction` type, so `-fsanitize=function` reports nothing in CF. | clean sanitizer runs |
 | S12 | `CFRuntime.c` | No change. Note that on Linux CF calls `libdispatch_init()` explicitly, which is why swift-corelibs-libdispatch (not Apple's upstream libdispatch) is required. | documentation |
 
 ---
@@ -431,18 +432,19 @@ configurations plus the Swift-mode compile check on every push; each job
 fetches and builds libdispatch, builds, tests, installs and builds and runs a
 consumer project in under a minute.
 
-Known sanitizer finding: with clang's `-fsanitize=undefined` (which since
-clang 17 includes `-fsanitize=function`), `CFBasicHash.c` trips the
-function-pointer type check, because the hash table stores its callbacks as
-generic pointers and calls `CFHash(CFTypeRef)` through a
-`CFHashCode (*)(void *)`. This is upstream code, benign on every ABI CF
-supports, and appears on the first dictionary insert. Sanitizer runs need
-`-fno-sanitize=function` until the callback casts are tidied (phase 2).
+Sanitizer note: clang's `-fsanitize=undefined` includes `-fsanitize=function`
+since clang 17. CF itself is clean under it after S13; libdispatch's own
+vtable dispatch is not, so a sanitizer build that also instruments libdispatch
+needs `-fno-sanitize=function` (the CI job does this).
 
-Phase 2, "it is a good citizen": S9, header self-containment test for every
-installed header, a FetchContent consumer test in CI, a CI matrix with Debian
-(packaged libdispatch), Fedora, Alpine (musl) and a sanitizer job, fix the
-`CFBasicHash` callback casts so `-fsanitize=function` is clean.
+Phase 2, "it is a good citizen": **implemented on this branch.** S9 and S13;
+a generated compile check for every public header, with and without Blocks
+(`Tests/C`, part of `all` and of `ctest`); CI extended with an ASan+UBSan job,
+a FetchContent consumer job, Debian bookworm (packaged libdispatch), Fedora
+(packaged libdispatch) and Alpine/musl (fetched libdispatch, vendored Blocks)
+container jobs. Verified locally: shared, static with interface libraries,
+vendored Blocks and sanitizer configurations pass all tests, and a consumer
+that vendors CoreFoundation with FetchContent builds and runs.
 
 Phase 3, "polish": S10 hidden visibility with an exports audit, S11 ISO8601
 restore, Windows and FreeBSD jobs, release tagging, first upstream sync with

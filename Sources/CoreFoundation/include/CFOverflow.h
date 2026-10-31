@@ -11,6 +11,7 @@
 #define CFOverflow_h
 
 #include "CFBase.h"
+#include <stddef.h>
 
 static bool __os_warn_unused(bool x) __attribute__((__warn_unused_result__));
 static bool __os_warn_unused(bool x) { return x; }

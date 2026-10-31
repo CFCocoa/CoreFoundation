@@ -11,6 +11,7 @@
 #define __COREFOUNDATION_CFDATECOMPONENTS__ 1
 
 #include "CFBase.h"
+#include "CFCalendar.h"
 
 CF_IMPLICIT_BRIDGING_ENABLED
 CF_EXTERN_C_BEGIN
