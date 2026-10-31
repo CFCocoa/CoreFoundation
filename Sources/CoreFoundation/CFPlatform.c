@@ -2461,7 +2461,9 @@ CF_EXPORT int _CFPosixSpawnFileActionsChdir(_CFPosixSpawnFileActionsRef file_act
   //  - OpenBSD 7.5 (April 2024)
   //  - QNX 8 (December 2023)
   return ENOSYS;
-  #elif defined(__GLIBC__) || TARGET_OS_DARWIN || defined(__FreeBSD__) || defined(__ANDROID__) || defined(__musl__)
+  // musl defines no identifying macro; a Linux libc that is neither glibc
+  // nor bionic is treated as musl.
+  #elif defined(__GLIBC__) || TARGET_OS_DARWIN || defined(__FreeBSD__) || defined(__ANDROID__) || defined(__musl__) || (defined(__linux__) && !defined(__GLIBC__))
   // Pre-standard posix_spawn_file_actions_addchdir_np version available in:
   //  - Solaris 11.3 (October 2015)
   //  - Glibc 2.29 (February 2019)
