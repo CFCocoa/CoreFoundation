@@ -1,0 +1,23 @@
+@PACKAGE_INIT@
+
+# Settings recorded from the build that produced this package.
+set(CF_ICU_PROVIDER "@CF_ICU_PROVIDER@")
+set(CF_USE_VENDORED_BLOCKSRUNTIME @CF_USE_VENDORED_BLOCKSRUNTIME@)
+set(CF_SWIFT_RUNTIME @CF_SWIFT_RUNTIME@)
+set(CoreFoundation_SHARED_LIBS @BUILD_SHARED_LIBS@)
+
+include(CMakeFindDependencyMacro)
+find_dependency(Threads)
+
+# A static CoreFoundation drags its own dependencies into the consumer's link
+# line, so they have to be located again here. A shared CoreFoundation only
+# needs its headers, which depend on nothing external.
+if(NOT CoreFoundation_SHARED_LIBS)
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
+    include("${CMAKE_CURRENT_LIST_DIR}/CFFindDependencies.cmake")
+    cf_find_dependencies()
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/CoreFoundationTargets.cmake")
+
+check_required_components(CoreFoundation)

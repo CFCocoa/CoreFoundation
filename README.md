@@ -1,88 +1,115 @@
-# Foundation
+# CoreFoundation
 
-The Foundation framework defines a base layer of functionality that is required for almost all applications. It provides primitive classes and introduces several paradigms that define functionality not provided by either the Objective-C runtime and language or Swift standard library and language.
+Apple's CoreFoundation, taken from [swift-corelibs-foundation](https://github.com/swiftlang/swift-corelibs-foundation)
+and built as a **standalone C library** with CMake. No Swift toolchain is
+involved: this is `libCoreFoundation` for C and C++ programs on Linux and the
+BSDs, the way the pre-Swift-6 CMake build used to provide it.
 
-It is designed with these goals in mind:
+The code is the upstream `Sources/CoreFoundation` tree with a handful of small
+patches that make the C runtime mode build again (see
+[Docs/StandaloneCBuildPlan.md](Docs/StandaloneCBuildPlan.md) for the full
+list and the reasoning). Upstream fixes are pulled in regularly; see
+[Docs/UPSTREAM.md](Docs/UPSTREAM.md).
 
-* Provide a small set of basic utility classes and data structures.
-* Make software development easier by introducing consistent conventions.
-* Support internationalization and localization, to make software accessible to users around the world.
-* Provide a level of OS independence, to enhance portability.
+## Building
 
-There is more information on the Foundation framework [here](https://developer.apple.com/library/mac/documentation/Cocoa/Reference/Foundation/ObjC_classic/).
+Requirements:
 
-This project, `swift-corelibs-foundation`, provides a compatibility implementation of the Foundation API for platforms where there is no Objective-C runtime. On macOS, iOS, and other Apple platforms, apps should use the Foundation that comes with the operating system.
+* CMake 3.20 or newer, and a generator such as Ninja.
+* **clang.** CoreFoundation uses the Blocks language extension, which gcc does
+  not implement.
+* ICU (`libicu-dev` on Debian/Ubuntu, `libicu-devel` on Fedora).
+* libdispatch from swift-corelibs-libdispatch (`libdispatch-dev` on Debian).
+  Ubuntu does not package it; configure with `-DCF_FETCH_LIBDISPATCH=ON` to
+  have it downloaded and built as part of this build, or point
+  `CMAKE_PREFIX_PATH`/`CF_DISPATCH_ROOT` at an existing installation (a Swift
+  toolchain's `usr/lib/swift` layout is recognised too).
+* A Blocks runtime (`libblocksruntime-dev`). If none is found, the copy under
+  `Sources/CoreFoundation/BlockRuntime` is compiled into the library.
 
-## Project Navigator
-
-Foundation builds in different configurations and is composed of several projects.
-
-```mermaid
-  graph TD;
-      FF[Foundation.framework]-->SF
-      subgraph GitHub
-        SCLF[swift-corelibs-foundation]-->SF
-        SF[swift-foundation]-->FICU[swift-foundation-icu]
-        SF-->SC[swift-collections]
-      end   
+```bash
+cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=clang -DCF_FETCH_LIBDISPATCH=ON
 ```
 
-### Swift Foundation
-
-A shared library shipped in the Swift toolchain, written in Swift. It provides the core implementation of many key types, including `URL`, `Data`, `JSONDecoder`, `Locale`, `Calendar`, and more in the `FoundationEssentials` and `FoundationInternationalization` modules. Its source code is shared across all platforms.
-
-_swift-foundation_ depends on a limited set of packages, primarily [swift-collections](http://github.com/apple/swift-collections) and [swift-syntax](http://github.com/apple/swift-syntax).
-
-### Swift Corelibs Foundation
-
-A shared library shipped in the Swift toolchain. It provides compatibility API for clients that need pre-Swift API from Foundation. It is written in Swift and C. It provides, among other types, `NSObject`, class-based data structures, `NSFormatter`, and `NSKeyedArchiver`. It re-exports the `FoundationEssentials` and `FoundationInternationalization` modules, allowing compatibility for source written before the introduction of the _swift-foundation_ project. As these implementations are distinct from those written in Objective-C, the compatibility is best-effort only.
-
-_swift-corelibs-foundation_ builds for non-Darwin platforms only. It installs the `Foundation` umbrella module, `FoundationXML`, and `FoundationNetworking`.
-
-### Foundation ICU
-
-A private library for Foundation, wrapping ICU. Using a standard version of ICU provides stability in the behavior of our internationalization API, and consistency with the latest releases on Darwin platforms. It is imported from the `FoundationInternationalization` module only. Clients that do not need API that relies upon the data provided by ICU can import `FoundationEssentials` instead.
-
-### Foundation Framework
-
-A [framework](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPFrameworks/Frameworks.html) built into macOS, iOS, and all other Darwin platforms. It is written in a combination of C, Objective-C, and Swift. The Foundation framework compiles the sources from _swift-foundation_ into its binary and provides one `Foundation` module that contains all features.
-
-
-## Using Foundation
-
-Here is a simple `main.swift` file which uses Foundation. This guide assumes you have already installed a version of the latest [Swift binary distribution](https://swift.org/download/#latest-development-snapshots).
-
-```swift
-import Foundation
-
-// Make a URLComponents instance
-let swifty = URLComponents(string: "https://swift.org")!
-
-// Print something useful about the URL
-print("\(swifty.host!)")
-
-// Output: "swift.org"
+```bash
+cmake --build build
 ```
 
-You will want to use the [Swift Package Manager](https://swift.org/package-manager/) to build your Swift apps.
-
-## Working on Foundation
-
-swift-corelibs-foundation builds as a standalone project using Swift Package Manager. Simply use `swift build` in the root of the checkout to build the project.
-
-swift-corelibs-foundation also builds as part of the toolchain for non-Darwin platforms. Instructions on building the toolchain are available in the [Swift project](https://github.com/swiftlang/swift?tab=readme-ov-file#building).
-
-### Building swift-corelibs-foundation on Windows
-
-When building Foundation as a standalone project, it requires you to provide some dependencies that it will link during the build. SwiftPM already fetches most of these dependencies and on Linux the remaining dependencies (dispatch, zlib, curl, libxml) are found in the Swift toolchain or on the host OS. However, Windows does not ship with zlib/curl/libxml on the host OS. In order to build swift-corelibs-foundation as a package on Windows, you must first checkout and build these dependenies before running `swift build` as recommended above. To do this, you can build the provided CMake target which (instead of building Foundation via CMake) will checkout and build these 3 dependencies via CMake and provide environment variables that will connect the SwiftPM build to these dependencies. To build these targets, run the following commands:
-
-```
-cmake -G Ninja -B <build folder> -DFOUNDATION_SWIFTPM_DEPS=YES
-cmake --build <build folder> --target --target WindowsSwiftPMDependencies
+```bash
+ctest --test-dir build
 ```
 
-After running these commands, the output will include a list of environment variables to set. After setting these environment variables, you can run `swift test`/`swift build` just like on Linux in order to build swift-corelibs-foundation with an existing Swift toolchain.
+```bash
+cmake --install build --prefix /opt/corefoundation
+```
 
-## Contributions
+### Options
 
-We welcome contributions to Foundation! Please see the [known issues](Docs/Issues.md) page if you are looking for an area where we need help. We are also standing by on the [mailing lists](https://swift.org/community/#communication) to answer questions about what is most important to do and what we will accept into the project.
+| Option | Default | Meaning |
+|---|---|---|
+| `BUILD_SHARED_LIBS` | `ON` | shared `libCoreFoundation.so.1` or static `libCoreFoundation.a` |
+| `CF_FETCH_LIBDISPATCH` | `OFF` | build swift-corelibs-libdispatch in-tree when no libdispatch is found (`CF_LIBDISPATCH_GIT_TAG` selects the tag) |
+| `CF_DISPATCH_ROOT` | | prefix of a libdispatch installation without a CMake package config |
+| `CF_BLOCKS_RUNTIME` | `auto` | `auto`, `system` or `vendored` |
+| `CF_ICU_PROVIDER` | `system` | `system` uses `find_package(ICU)`; `foundation-icu` builds against a swift-foundation-icu checkout at `CF_FOUNDATION_ICU_DIR` |
+| `CF_BUILD_XML_INTERFACE` | `OFF` | also build `_CFXMLInterface` (needs libxml2). Only useful for Swift Foundation compatibility |
+| `CF_BUILD_URLSESSION_INTERFACE` | `OFF` | also build `_CFURLSessionInterface` (needs libcurl). Only useful for Swift Foundation compatibility |
+| `CF_BUILD_TESTS` | `ON` when top-level | build the C smoke tests |
+| `CF_INSTALL` | `ON` when top-level | generate install rules |
+| `CF_SWIFT_RUNTIME` | `OFF` | build for the Swift runtime instead of the C runtime. Unsupported here; it exists so the Swift mode keeps compiling |
+
+## Using it
+
+With an installed copy:
+
+```cmake
+find_package(CoreFoundation 1.0 REQUIRED)
+target_link_libraries(app PRIVATE CoreFoundation::CoreFoundation)
+```
+
+Vendored into your own build:
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(CoreFoundation
+    GIT_REPOSITORY https://github.com/CFCocoa/CoreFoundation
+    GIT_TAG        main)
+FetchContent_MakeAvailable(CoreFoundation)
+target_link_libraries(app PRIVATE CoreFoundation::CoreFoundation)
+```
+
+A `CoreFoundation.pc` file is installed for pkg-config users.
+
+```c
+#include <CoreFoundation/CoreFoundation.h>
+
+int main(void) {
+    CFStringRef s = CFStringCreateWithFormat(NULL, NULL, CFSTR("%d bottles"), 99);
+    CFShow(s);
+    CFRelease(s);
+    return 0;
+}
+```
+
+The headers compile with any C compiler; the handful of APIs that take blocks
+(`CFRunLoopPerformBlock`, `CFRunLoopTimerCreateWithHandler`, ...) appear only
+when compiling with `-fblocks`. Code that writes blocks of its own must also
+link the Blocks runtime (`-lBlocksRuntime`, or the `BlocksRuntime::BlocksRuntime`
+target from `cmake/FindBlocksRuntime.cmake`); CoreFoundation only carries the
+runtime when the vendored copy was compiled in.
+
+## What is and is not here
+
+* The public C API is the one documented by Apple, as implemented by
+  swift-corelibs-foundation (feature level of roughly macOS Monterey). Mach
+  ports, message ports and user notifications are not implemented, as upstream.
+* macOS is not a target. Programs that need CoreFoundation on macOS should use
+  the system framework.
+* `_CFXMLInterface` and `_CFURLSessionInterface` are thin shims written for
+  importing libxml2 and libcurl into Swift. They build here behind options, but
+  C programs are better off using libxml2 and libcurl directly.
+
+## License
+
+Apache License 2.0 with the Swift runtime library exception, as upstream. See
+[LICENSE](LICENSE).

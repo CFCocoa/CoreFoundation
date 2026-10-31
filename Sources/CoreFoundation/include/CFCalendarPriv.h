@@ -35,12 +35,16 @@ CF_EXPORT Boolean _CFCalendarComposeAbsoluteTimeV(CFCalendarRef calendar, /* out
 CF_EXPORT Boolean _CFCalendarDecomposeAbsoluteTimeV(CFCalendarRef calendar, CFAbsoluteTime at, const char *componentDesc, int32_t *_Nonnull * _Nonnull vector, int32_t count);
 CF_EXPORT Boolean _CFCalendarAddComponentsV(CFCalendarRef calendar, /* inout */ CFAbsoluteTime *atp, CFOptionFlags options, const char *componentDesc, int32_t *vector, int32_t count);
 CF_EXPORT Boolean _CFCalendarGetComponentDifferenceV(CFCalendarRef calendar, CFAbsoluteTime startingAT, CFAbsoluteTime resultAT, CFOptionFlags options, const char *componentDesc, int32_t *_Nonnull * _Nonnull vector, int32_t count);
+#if __BLOCKS__
 CF_EXPORT void _CFCalendarEnumerateDates(CFCalendarRef calendar, CFDateRef start, CFDateComponentsRef matchingComponents, CFOptionFlags opts, void (^block)(CFDateRef _Nullable, Boolean, Boolean*));
+#endif
 
 CF_EXPORT Boolean _CFCalendarIsDateInWeekend(CFCalendarRef calendar, CFDateRef date);
 CF_EXPORT Boolean _CFCalendarGetNextWeekend(CFCalendarRef calendar, _CFCalendarWeekendRange *range);
 
+#if __BLOCKS__
 CF_EXPORT void _CFCalendarEnumerateDates(CFCalendarRef calendar, CFDateRef start, CFDateComponentsRef matchingComponents, CFOptionFlags opts, void (^block)(CFDateRef _Nullable, Boolean, Boolean*));
+#endif
 CF_EXPORT void CFCalendarSetGregorianStartDate(CFCalendarRef calendar, CFDateRef _Nullable date);
 CF_EXPORT _Nullable CFDateRef CFCalendarCopyGregorianStartDate(CFCalendarRef calendar);
 

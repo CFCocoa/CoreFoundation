@@ -1,45 +1,43 @@
-##===----------------------------------------------------------------------===##
-##
-## This source file is part of the Swift open source project
-##
-## Copyright (c) 2024 Apple Inc. and the Swift project authors
-## Licensed under Apache License v2.0
-##
-## See LICENSE.txt for license information
-## See CONTRIBUTORS.md for the list of Swift project authors
-##
-## SPDX-License-Identifier: Apache-2.0
-##
-##===----------------------------------------------------------------------===##
+# _CFXMLInterface: libxml2 helpers used by Swift's FoundationXML. In the C
+# runtime mode the SAX callback bridge is compiled out, so this library is only
+# useful for Swift Foundation compatibility.
+# SPDX-License-Identifier: Apache-2.0
 
-add_library(_CFXMLInterface STATIC CFXMLInterface.c)
+include(CFCommonSettings)
+
+if(ANDROID)
+    # LibXml2 looks for the Threads package; keep it from using -pthread on Android.
+    set(CMAKE_HAVE_LIBC_PTHREAD YES)
+endif()
+find_package(LibXml2 REQUIRED)
+
+add_library(_CFXMLInterface CFXMLInterface.c)
+add_library(CoreFoundation::_CFXMLInterface ALIAS _CFXMLInterface)
+set_target_properties(_CFXMLInterface PROPERTIES
+    VERSION ${PROJECT_VERSION}
+    SOVERSION ${PROJECT_VERSION_MAJOR})
 
 target_include_directories(_CFXMLInterface
     PUBLIC
-        include
-        ../CoreFoundation/include
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/CFXMLInterface>
     PRIVATE
-        ../CoreFoundation/internalInclude)
+        ${CMAKE_CURRENT_SOURCE_DIR}/../CoreFoundation/internalInclude)
 
-target_compile_options(_CFXMLInterface INTERFACE
-  "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -fmodule-map-file=${CMAKE_CURRENT_SOURCE_DIR}/../CoreFoundation/include/module.modulemap>"
-  "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -fmodule-map-file=${CMAKE_CURRENT_SOURCE_DIR}/include/module.modulemap>")
+cf_apply_common_c_settings(_CFXMLInterface)
 
-target_compile_options(_CFXMLInterface PRIVATE
-    "SHELL:$<$<COMPILE_LANGUAGE:C>:${_Foundation_common_build_flags}>")
-
-target_link_libraries(_CFXMLInterface PRIVATE
-    dispatch
-    LibXml2::LibXml2)
-
-if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
-    target_link_libraries(_CFXMLInterface PRIVATE BlocksRuntime)
+target_link_libraries(_CFXMLInterface
+    PUBLIC CoreFoundation
+    PRIVATE LibXml2::LibXml2 CF::dispatch)
+if(NOT CF_USE_VENDORED_BLOCKSRUNTIME)
+    target_link_libraries(_CFXMLInterface PRIVATE CF::BlocksRuntime)
 endif()
 
-if(NOT BUILD_SHARED_LIBS)
-    set_property(GLOBAL APPEND PROPERTY Foundation_EXPORTS _CFXMLInterface)
+if(CF_INSTALL)
     install(TARGETS _CFXMLInterface
-        ARCHIVE DESTINATION lib/swift_static/${SWIFT_SYSTEM_NAME}
-        LIBRARY DESTINATION lib/swift_static/${SWIFT_SYSTEM_NAME}
-        RUNTIME DESTINATION bin)
+        EXPORT CoreFoundationTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/CFXMLInterface)
 endif()

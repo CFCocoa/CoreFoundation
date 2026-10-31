@@ -64,6 +64,17 @@
 
 extern void __CFGetUGIDs(uid_t *euid, gid_t *egid);
 
+// Implemented in Swift (FileManager.swift) when building for the Swift runtime.
+#if !DEPLOYMENT_RUNTIME_SWIFT && !TARGET_OS_WASI
+CF_EXPORT Boolean _CFGetCurrentDirectory(char *path, int maxlen) {
+#if TARGET_OS_WIN32
+    return _getcwd(path, maxlen) != NULL;
+#else
+    return getcwd(path, (size_t)maxlen) != NULL;
+#endif
+}
+#endif
+
 #if TARGET_OS_MAC
 // CoreGraphics and LaunchServices are only projects (1 Dec 2006) that use these
 char **_CFArgv(void) { return *_NSGetArgv(); }
@@ -465,6 +476,54 @@ CF_EXPORT CFStringRef CFGetUserName(void) CF_RETURNS_RETAINED {
 }
 
 // CFCopyUserName() is implemented in Swift (NSPathUtilities.swift) with ProcessInfo.processInfo.userName.
+// In the C runtime mode there is no Swift, so provide it here.
+#if !DEPLOYMENT_RUNTIME_SWIFT
+CF_EXPORT CFStringRef CFCopyUserName(void) {
+    CFStringRef result = NULL;
+#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD
+    uid_t euid;
+    __CFGetUGIDs(&euid, NULL);
+    struct passwd pwd;
+    struct passwd *upwd = NULL;
+    long bufsize = sysconf(_SC_GETPW_R_SIZE_MAX);
+    if (bufsize <= 0) bufsize = 16384;
+    char *buf = (char *)malloc((size_t)bufsize);
+    if (buf && 0 == getpwuid_r(euid ? euid : getuid(), &pwd, buf, (size_t)bufsize, &upwd) && upwd && upwd->pw_name) {
+        result = CFStringCreateWithCString(kCFAllocatorSystemDefault, upwd->pw_name, kCFPlatformInterfaceStringEncoding);
+    }
+    free(buf);
+    if (!result) {
+        const char *cuser = __CFgetenv("USER");
+        if (cuser) {
+            result = CFStringCreateWithCString(kCFAllocatorSystemDefault, cuser, kCFPlatformInterfaceStringEncoding);
+        }
+    }
+#elif TARGET_OS_WIN32
+    wchar_t username[1040];
+    DWORD size = 1040;
+    username[0] = 0;
+    if (GetUserNameW(username, &size)) {
+        // discount the extra NULL by decrementing the size
+        result = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, (const UniChar *)username, size - 1);
+    } else {
+        const char *cname = __CFgetenv("USERNAME");
+        if (cname) {
+            result = CFStringCreateWithCString(kCFAllocatorSystemDefault, cname, kCFPlatformInterfaceStringEncoding);
+        }
+    }
+#elif TARGET_OS_WASI
+    const char *cuser = __CFgetenv("USER");
+    if (cuser) {
+        result = CFStringCreateWithCString(kCFAllocatorSystemDefault, cuser, kCFPlatformInterfaceStringEncoding);
+    }
+#else
+#error "Please add an implementation for CFCopyUserName() that copies the account username"
+#endif
+    if (!result)
+        result = (CFStringRef)CFRetain(CFSTR(""));
+    return result;
+}
+#endif // !DEPLOYMENT_RUNTIME_SWIFT
 
 #if TARGET_OS_ANDROID
 #define pw_gecos pw_name
@@ -1645,11 +1704,20 @@ CF_PRIVATE int asprintf(char **ret, const char *format, ...) {
 
 #endif
 
-#if DEPLOYMENT_RUNTIME_SWIFT
 #include <fcntl.h>
 
+// Thread-specific storage holds a retained CFTypeRef. Under the Swift runtime
+// every CF object is a Swift object, so retain/release go through the Swift
+// runtime; in the C runtime mode they are ordinary CFRetain/CFRelease.
+#if DEPLOYMENT_RUNTIME_SWIFT
 extern void *swift_retain(void *);
 extern void swift_release(void *);
+#define __CFThreadSpecificRetain(v) swift_retain((void *)(v))
+#define __CFThreadSpecificRelease(v) swift_release((void *)(v))
+#else
+#define __CFThreadSpecificRetain(v) CFRetain((CFTypeRef)(v))
+#define __CFThreadSpecificRelease(v) CFRelease((CFTypeRef)(v))
+#endif
 
 #if TARGET_OS_WIN32
 typedef struct _CFThreadSpecificData {
@@ -1665,10 +1733,10 @@ static void _CFThreadSpecificDestructor(void *ctx) {
 #if TARGET_OS_WIN32
     _CFThreadSpecificData *data = (_CFThreadSpecificData *)ctx;
     FlsSetValue(data->key, NULL);
-    swift_release(data->value);
+    __CFThreadSpecificRelease(data->value);
     free(data);
 #elif !TARGET_OS_WASI || defined(_REENTRANT)
-    swift_release(ctx);
+    __CFThreadSpecificRelease(ctx);
 #endif
 }
 
@@ -1714,13 +1782,13 @@ void _CFThreadSpecificSet(_CFThreadSpecificKey key, CFTypeRef _Nullable value) {
         data->value = value;
         data->key = key;
 
-        swift_retain((void *)value);
+        __CFThreadSpecificRetain(value);
     }
 
     FlsSetValue(key, data);
 #elif !TARGET_OS_WASI || defined(_REENTRANT)
     if (value != NULL) {
-        swift_retain((void *)value);
+        __CFThreadSpecificRetain(value);
         pthread_setspecific(key, value);
     } else {
         pthread_setspecific(key, NULL);
@@ -2436,8 +2504,6 @@ CF_EXPORT void _CFPosixSpawnAttrDealloc(_CFPosixSpawnAttrRef spawn_attr) {
 CF_EXPORT int _CFPosixSpawnAttrSetFlags(_CFPosixSpawnAttrRef spawn_attr, short flags) {
     return posix_spawnattr_setflags((posix_spawnattr_t *)spawn_attr, flags);
 }
-#endif
-
 #endif
 
 #endif

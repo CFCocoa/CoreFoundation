@@ -1,5 +1,8 @@
 # Plan: CoreFoundation as a standalone C library (CMake)
 
+Status: Phase 1 is implemented on this branch (see section 7). The findings in
+section 1 describe the tree as it was before that work.
+
 Goal: make `Sources/CoreFoundation` (plus, optionally, `_CFXMLInterface` and
 `_CFURLSessionInterface`) buildable and installable as a plain C library with
 CMake, with no Swift toolchain involved, so that other projects can
@@ -208,123 +211,114 @@ section tricks, no runtime data files).
 
 1. **C runtime mode is the product.** The library is built with
    `DEPLOYMENT_RUNTIME_SWIFT=0` and without `-fcf-runtime-abi=swift`. The
-   Swift mode is kept compiling behind an option (`CF_SWIFT_RUNTIME`, default
-   OFF) purely to keep the fork mergeable with upstream, not as a supported
-   configuration.
+   Swift mode is kept compiling behind `CF_SWIFT_RUNTIME` (default OFF) so
+   that upstream syncs stay small; it is not a supported configuration.
 2. **Installed headers must match the built mode.** The default in the headers
-   flips to 0 (upstream Swift builds already pass the define explicitly in
-   both `Package.swift` and CMake), and the install step also writes a
-   `CFBuildConfig.h` (or a `#define` into the installed `CFAvailability.h`)
-   that pins the mode the binary was built with.
-3. **Shared and static both supported**, `BUILD_SHARED_LIBS` controls it. A
-   `SOVERSION` is needed; propose `1338` from the 5.10.1 `project(VERSION)`,
-   or restart at `1.0`.
+   is 0 (upstream's own Swift builds pass the define explicitly in both
+   `Package.swift` and CMake, so they are unaffected). `CF_SWIFT_RUNTIME=ON`
+   adds the define as a PUBLIC compile definition.
+3. **Shared and static both supported**, `BUILD_SHARED_LIBS` controls it.
+   Versioning starts at `1.0.0` with `SOVERSION 1`.
 4. **No source rewrites for the ICU include prefix.** Sources use
-   `<_foundation_unicode/*.h>` (25 headers). Instead of sed-ing them to
-   `<unicode/*.h>` (a diff that touches 14 files and fights every upstream
-   sync), generate a shim directory at configure time: for each header name
-   found by `grep` in the sources, write
-   `${build}/icu-shim/_foundation_unicode/<name>.h` containing
-   `#include <unicode/<name>.h>`, and add `icu-shim` as a private include dir.
-   The same mechanism lets `CF_ICU_PROVIDER=foundation-icu` point at a
-   swift-foundation-icu checkout if someone wants Apple ICU behaviour.
+   `<_foundation_unicode/*.h>`. A configure-time generator writes one-line
+   forwarding headers into `<build>/icu-shim/_foundation_unicode/` for every
+   header that exists in the ICU being used, so the sources'
+   `__has_include` checks for Apple-only additions keep working.
+   `CF_ICU_PROVIDER=foundation-icu` builds against a swift-foundation-icu
+   checkout instead (untested here).
 5. **Interface libraries are opt-in.** `CF_BUILD_XML_INTERFACE` and
-   `CF_BUILD_URLSESSION_INTERFACE` default OFF; when ON they
-   `find_package(LibXml2 REQUIRED)` / `find_package(CURL REQUIRED)`.
-6. **Minimal, upstreamable source patches.** Every change in section 3 is
-   either a bug fix in the C path or a guard change; none alters Swift-mode
-   behaviour. Several are worth sending upstream, which shrinks the fork's
-   delta over time.
-7. **Repository shape.** Two options:
-   * A: keep the full upstream tree and only add the CMake files and the
-     patches. Upstream merges stay trivial, but the repo carries ~3 MB of
-     Swift sources that this fork never builds.
-   * B (recommended): trim to `Sources/CoreFoundation`,
-     `Sources/_CFXMLInterface`, `Sources/_CFURLSessionInterface`, `LICENSE`,
-     docs. Sync from upstream with path-filtered patches
-     (`git format-patch <last>..upstream/main -- Sources/CoreFoundation
-     Sources/_CF*` then `git am -3`), never with `git merge`, so the deleted
-     Swift paths never produce modify/delete conflicts. A tiny
-     `Tools/sync-upstream.sh` records the last synced upstream SHA.
+   `CF_BUILD_URLSESSION_INTERFACE` default OFF.
+6. **No upstreaming.** Upstream has moved on to Swift-only implementations
+   and keeps removing C code that Swift duplicates; patches here are kept
+   small so that syncing stays cheap, not because they are expected to land
+   upstream.
+7. **Repository trimmed to CF.** Only `Sources/CoreFoundation`,
+   `Sources/_CFXMLInterface` and `Sources/_CFURLSessionInterface` are kept
+   from upstream. Syncing uses path-limited `git format-patch`/`git am`, never
+   `git merge` (see `Docs/UPSTREAM.md` and `Tools/sync-upstream.sh`).
+8. **macOS is out of scope.** Programs on macOS use the system
+   CoreFoundation; this library is for platforms that have none.
+9. **The vendored `uuid.c` stays.** It is Apple's uuid library with the Swift
+   team's Windows, WASI and Linux ports, not a copy of libuuid. Its symbols are
+   given hidden visibility so they cannot interpose a libuuid loaded in the
+   same process; `CFUUID.c`'s `_cf_uuid_*` wrappers remain the external API.
 
 ---
 
-## 3. Source changes required
+## 3. Source changes
 
-Ordered by necessity. "Upstreamable" marks changes that make sense in
-swift-corelibs-foundation itself.
+All of these are in place on this branch unless marked otherwise. Each one is
+a bug fix in the C path or a guard change; none alters Swift-mode behaviour.
 
-| # | File(s) | Change | Why | Upstreamable |
-|---|---|---|---|---|
-| S1 | `include/CFAvailability.h`, `internalInclude/CoreFoundation_Prefix.h` | `#ifndef DEPLOYMENT_RUNTIME_SWIFT` → `#define DEPLOYMENT_RUNTIME_SWIFT 0` (or drop the fallback and let the build system define it). Install step pins the built mode. | 1.2, 1.4 | no (fork policy) |
-| S2 | `internalInclude/CFInternal.h` | Include the thread/platform declarations unconditionally. Minimal form: include `ForSwiftFoundationOnly.h` outside the `#if DEPLOYMENT_RUNTIME_SWIFT` (proven sufficient by pass B). Cleaner form: move `_CFThreadRef`/`_CFThreadAttributes`/`_CFThreadSpecificKey`, `_CFIsMainThread`, `_CFMainPThread`, `_CFThread*`, `_CFEnviron`, `_CFOpenFile*`, `_CFReallocf`, `_CFPosixSpawn*`, `_cf_uuid_*`, `__CFHashDouble`, `CFSortIndexes` into a new `CFPlatformPriv.h` that both `CFInternal.h` and `ForSwiftFoundationOnly.h` include. | 1.3 pass A | yes (cleaner form) |
-| S3 | `CFPlatform.c` lines 1648-2443 | Split the `#if DEPLOYMENT_RUNTIME_SWIFT` block. Thread-specific get/set keep `swift_retain`/`swift_release` under Swift and use `CFRetain`/`CFRelease` otherwise; `_CFThreadCreate`, `_CFThreadSetName`, `_CFThreadGetName`, `_CFEnviron`, `_CFOpenFile*`, `_CFReallocf`, `_CFPosixSpawn*` become unconditional. Required for `CFStream.c` to link (`_CFThreadSetName`). | 1.3 | yes |
-| S4 | `CFRuntime.c:1719` | `__kCFAllocatorTypeID_CONST` → `_kCFRuntimeIDCFAllocator`. | compile error in C path, also broken in 5.10.1 | yes |
-| S5 | `CFPlatform.c` | Restore C implementations guarded `#if !DEPLOYMENT_RUNTIME_SWIFT`: `CFCopyUserName` (use the `getpwuid_r` form from `5674de5`, Windows via `GetUserNameW`) and `_CFGetCurrentDirectory` (`getcwd`, Windows `GetCurrentDirectoryW`). Swift mode keeps the `@_cdecl` providers. | 3 unresolved symbols | yes |
-| S6 | `include/CoreFoundation.h` | Include `ForSwiftFoundationOnly.h` only `#if DEPLOYMENT_RUNTIME_SWIFT`; include the new `CFPlatformPriv.h` (from S2) so `_CFThreadRef` etc. stay available to C consumers that used them. | 1.7 | yes |
-| S7 | `Sources/_CFURLSessionInterface/CMakeLists.txt` | `${CMAKE_SOURCE_DIR}` → `${CMAKE_CURRENT_SOURCE_DIR}/../CoreFoundation`. | vendoring via `add_subdirectory` | yes |
-| S8 | `uuid.c`, `internalInclude/uuid.h` | Give the vendored `uuid_*` functions hidden visibility (or `#define uuid_generate __CFuuid_generate` style renames in `uuid.h`). `CFUUID.c` already exposes `_cf_uuid_*` wrappers for external use. | libuuid clash in static builds | yes |
-| S9 | the 7 headers in 1.7 | Add the missing includes; move `CFStringEncodingConverterPriv.h` and `CFStringEncodingDatabase.h` to `internalInclude/` (check no Swift importer dependency first; `grep` shows they are not in the module map umbrella list, but the umbrella is `CoreFoundation.h`, so verify). | header self-containment, enables a CI header check | yes |
-| S10 | `include/CFBase.h` | On ELF/Mach-O define `CF_EXPORT` as `extern __attribute__((visibility("default")))` so the library can be built with `-fvisibility=hidden`. Internal `__CF*` symbols that Swift Foundation reaches for are already `CF_EXPORT`/`CF_CROSS_PLATFORM_EXPORT`. | smaller export table, fewer clashes | yes |
-| S11 | `include/CFDateFormatter.h`, `CFDateFormatter.c` | Optionally restore `CFISO8601DateFormatOptions` and `CFDateFormatterCreateISO8601Formatter` from 5.10.1 under `#if !DEPLOYMENT_RUNTIME_SWIFT` (or unconditionally; the Swift side no longer calls it). | only C API lost since 5.10.1 | fork-only unless upstream agrees |
-| S12 | `CFRuntime.c` (`__CFInitialize`) | Nothing to change, but note: on Linux CF calls `libdispatch_init()` explicitly before anything else (`__HAS_DISPATCH__ && !TARGET_OS_MAC`). This is why a swift-corelibs-libdispatch (not Apple's upstream libdispatch) is required; document it. | documentation | n/a |
-
-Everything else (CFRunLoop `_counterpart`, `_CFSwiftRetain/Release`, the
-bridge tables, `CFLog1`) is already correctly guarded.
+| # | File(s) | Change | Why |
+|---|---|---|---|
+| S1 | `include/CFAvailability.h`, `internalInclude/CoreFoundation_Prefix.h` | `DEPLOYMENT_RUNTIME_SWIFT` defaults to 0 instead of 1. | 1.2, 1.4 |
+| S2 | `internalInclude/CFInternal.h` | `ForSwiftFoundationOnly.h` is included in both runtime modes; it declares the thread, spawn and uuid helpers CF itself uses. | 1.3 pass A |
+| S3 | `CFPlatform.c` | The block of platform helpers is no longer `#if DEPLOYMENT_RUNTIME_SWIFT`; only the thread-specific retain/release inside it is, via `__CFThreadSpecificRetain/Release` macros that map to `swift_retain/release` or `CFRetain/CFRelease`. | `_CFThreadSetName` etc. needed by `CFStream.c` |
+| S4 | `CFRuntime.c` | `__kCFAllocatorTypeID_CONST` → `_kCFRuntimeIDCFAllocator` in `_CFRelease`. | compile error in the C path, also broken in 5.10.1 |
+| S5 | `CFPlatform.c` | C implementations of `CFCopyUserName` (`getpwuid_r`, `GetUserNameW` on Windows) and `_CFGetCurrentDirectory` under `#if !DEPLOYMENT_RUNTIME_SWIFT`; Swift mode keeps the `@_cdecl` providers. | 3 unresolved symbols |
+| S6 | `include/CoreFoundation.h` | Includes `ForSwiftFoundationOnly.h` only `#if DEPLOYMENT_RUNTIME_SWIFT`, so C consumers do not see the Swift bridge structs (and compile without `-fblocks`). | 1.7 |
+| S7 | `include/CFCalendarPriv.h`, `include/ForSwiftFoundationOnly.h` | Block-typed declarations guarded by `#if __BLOCKS__`, as the rest of the public headers already are. | consumers without `-fblocks` |
+| S8 | `internalInclude/uuid.h` | Vendored `uuid_*` functions get hidden visibility. | libuuid interposition |
+| S9 | the other headers in 1.7 | Missing includes in `CFOverflow.h`, `CFLocking.h`, `CFDateComponents.h`, `CFBundle_BinaryTypes.h`; move `CFStringEncodingConverterPriv.h` and `CFStringEncodingDatabase.h` to `internalInclude/`. **Not done yet** (phase 2). | header self-containment |
+| S10 | `include/CFBase.h` | `CF_EXPORT` with `visibility("default")` on ELF so the library can use `-fvisibility=hidden`. **Not done yet** (phase 3). | smaller export table |
+| S11 | `include/CFDateFormatter.h`, `CFDateFormatter.c` | Restore `CFISO8601DateFormatOptions` and `CFDateFormatterCreateISO8601Formatter` from 5.10.1. **Not done yet** (phase 3). | only C API lost since 5.10.1 |
+| S12 | `CFRuntime.c` | No change. Note that on Linux CF calls `libdispatch_init()` explicitly, which is why swift-corelibs-libdispatch (not Apple's upstream libdispatch) is required. | documentation |
 
 ---
 
 ## 4. CMake design
 
-### 4.1 File layout (after trimming, option B)
+### 4.1 File layout (as implemented)
 
 ```
-CMakeLists.txt                      # project(CoreFoundation VERSION 1338.0.0 LANGUAGES C)
+CMakeLists.txt                      # project(CoreFoundation VERSION 1.0.0 LANGUAGES C), options, deps, install
 cmake/
-  CoreFoundationConfig.cmake.in     # find_dependency(ICU ...), find_dependency(dispatch) ...
+  CFFindDependencies.cmake          # CF::ICU, CF::dispatch, CF::BlocksRuntime wrappers; also installed
+  CFIcuShim.cmake                   # generates <build>/icu-shim/_foundation_unicode/*.h
+  CFCommonSettings.cmake            # feature checks + the flag list shared by the three C targets
+  FindBlocksRuntime.cmake           # finds Block.h / libBlocksRuntime; also installed
+  CoreFoundationConfig.cmake.in     # package config; re-finds deps for static builds only
   CoreFoundation.pc.in
-  FindBlocksRuntime.cmake           # borrowed from libdispatch (BSD/Apache compatible)
-  FindLibDispatch.cmake             # CONFIG first, then find_path/find_library fallback
-  CFIcuShim.cmake                   # generates icu-shim/_foundation_unicode/*.h
-  CFCompilerFlags.cmake             # the flag list from Package.swift, minus Swift-specific ones
+Sources/CMakeLists.txt
 Sources/CoreFoundation/CMakeLists.txt
-Sources/CoreFoundation/BlockRuntime/CMakeLists.txt   # already exists; reused for CF_USE_VENDORED_BLOCKSRUNTIME
 Sources/_CFXMLInterface/CMakeLists.txt
 Sources/_CFURLSessionInterface/CMakeLists.txt
-Tests/C/                            # smoke tests, see section 5
-Docs/
+Tests/C/{CMakeLists.txt,smoke.c,headers.c}
+Tools/sync-upstream.sh
+Docs/{StandaloneCBuildPlan.md,UPSTREAM.md}
 ```
 
 ### 4.2 Options
 
 | Option | Default | Effect |
 |---|---|---|
-| `BUILD_SHARED_LIBS` | ON | shared `libCoreFoundation.so.1338` vs static |
+| `BUILD_SHARED_LIBS` | ON | shared `libCoreFoundation.so.1` vs static |
 | `CF_BUILD_XML_INTERFACE` | OFF | build `_CFXMLInterface`, requires LibXml2 |
 | `CF_BUILD_URLSESSION_INTERFACE` | OFF | build `_CFURLSessionInterface`, requires CURL |
-| `CF_SWIFT_RUNTIME` | OFF | `DEPLOYMENT_RUNTIME_SWIFT=1` + `-fcf-runtime-abi=swift`; unsupported, kept for upstream parity |
+| `CF_SWIFT_RUNTIME` | OFF | `DEPLOYMENT_RUNTIME_SWIFT=1` + `-fcf-runtime-abi=swift`; unsupported |
 | `CF_ICU_PROVIDER` | `system` | `system` uses `find_package(ICU)`; `foundation-icu` expects `CF_FOUNDATION_ICU_DIR` |
-| `CF_FETCH_LIBDISPATCH` | OFF | `FetchContent` swift-corelibs-libdispatch when no `dispatch` package is found (Ubuntu case) |
-| `CF_USE_VENDORED_BLOCKSRUNTIME` | `AUTO` | use `BlockRuntime/` object library when no system BlocksRuntime is found |
-| `CF_BUILD_TESTS` | ON when top-level | adds the C smoke tests to CTest |
+| `CF_FETCH_LIBDISPATCH` | OFF | `FetchContent` swift-corelibs-libdispatch (`CF_LIBDISPATCH_GIT_TAG`) when no `dispatch` package is found |
+| `CF_DISPATCH_ROOT` | | prefix of a libdispatch install without a CMake package config; the Swift toolchain layout is also searched |
+| `CF_BLOCKS_RUNTIME` | `auto` | `auto` (system, else vendored), `system`, `vendored` |
+| `CF_BUILD_TESTS` | ON when top-level | adds the C tests to CTest |
 | `CF_INSTALL` | ON when top-level | install rules and package config |
 | `CF_ENABLE_WERROR` | OFF | |
 
 ### 4.3 Targets and usage
 
 * Library target `CoreFoundation`, alias `CoreFoundation::CoreFoundation`.
-  Output name `CoreFoundation`, `SOVERSION 1338`, `C_VISIBILITY_PRESET hidden`
-  once S10 is in.
+  Output name `CoreFoundation`, `VERSION 1.0.0`, `SOVERSION 1`,
+  `C_VISIBILITY_PRESET hidden` once S10 is in.
 * Public include dirs: `$<BUILD_INTERFACE:.../include>`,
   `$<INSTALL_INTERFACE:include>` and `include/CoreFoundation` (so both
   `#include <CoreFoundation/CoreFoundation.h>` and the quoted internal style
   work).
-* Public compile definitions: `DEPLOYMENT_RUNTIME_SWIFT=0` (until S1 lands,
-  then not needed). Do not force `-fblocks` on consumers: the block-taking
-  APIs in the public headers (`CFRunLoop.h`, `CFStorage.h`,
-  `CFCalendarPriv.h`, `ForFoundationOnly.h`) are all guarded by
-  `#if __BLOCKS__`, so a consumer compiled without Blocks simply does not see
-  them. Document that `-fblocks` is needed to use those few APIs.
+* No public compile definitions in C mode (the headers default to it).
+  `-fblocks` is not forced on consumers: every block-taking declaration in
+  the public headers is guarded by `#if __BLOCKS__`, so a consumer compiled
+  without Blocks simply does not see them. Consumers that write blocks link
+  the Blocks runtime themselves.
 * Private: `CF_BUILDING_CF`, `HAVE_STRUCT_TIMESPEC`, `_GNU_SOURCE` on
   Linux/Android, `HAVE_STRLCAT`/`HAVE_STRLCPY`/`HAVE_ISSETUGID`/
   `HAVE_SCHED_GETAFFINITY` from `check_symbol_exists`, the `-Wno-*` list,
@@ -344,13 +338,13 @@ Docs/
 Consumer examples the README should carry:
 
 ```cmake
-find_package(CoreFoundation 1338 REQUIRED)
+find_package(CoreFoundation 1.0 REQUIRED)
 target_link_libraries(app PRIVATE CoreFoundation::CoreFoundation)
 ```
 
 ```cmake
 include(FetchContent)
-FetchContent_Declare(CoreFoundation GIT_REPOSITORY https://github.com/CFCocoa/CoreFoundation GIT_TAG v1338.0.0)
+FetchContent_Declare(CoreFoundation GIT_REPOSITORY https://github.com/CFCocoa/CoreFoundation GIT_TAG v1.0.0)
 set(CF_BUILD_TESTS OFF)
 FetchContent_MakeAvailable(CoreFoundation)
 target_link_libraries(app PRIVATE CoreFoundation::CoreFoundation)
@@ -365,9 +359,7 @@ target_link_libraries(app PRIVATE CoreFoundation::CoreFoundation)
 * Android: link `log`; keep `CMAKE_HAVE_LIBC_PTHREAD`.
 * Windows: `shell32 ole32`, `CF_WINDOWS_EXECUTABLE_INITIALIZER` for static,
   `_DLL`/`_WINDLL` as in 5.10.1. Second phase; needs a libdispatch build too.
-* macOS: a non-system CF conflicts with the OS CoreFoundation symbol-wise.
-  Mark unsupported initially (or build only static with a prefixed install
-  name) rather than promise it.
+* macOS: out of scope; programs there use the system CoreFoundation.
 * WASI: no dispatch (`__HAS_DISPATCH__ 0`), vendored BlocksRuntime; keep the
   existing conditionals but do not test it in phase 1.
 
@@ -397,48 +389,59 @@ target_link_libraries(app PRIVATE CoreFoundation::CoreFoundation)
 
 ## 6. Upstream sync strategy
 
-* Record the upstream SHA this fork is based on in `Docs/UPSTREAM.md`.
-* `Tools/sync-upstream.sh`: fetch `swiftlang/swift-corelibs-foundation`,
-  `git format-patch` the range restricted to the three `Sources/` dirs,
-  `git am -3`, update the SHA. Upstream churn in CF is modest (190 commits in
-  roughly 2.5 years, almost all small fixes), so conflicts will be rare and
-  confined to the files touched by S1-S11.
-* Send S2 (cleaner form), S3, S4, S5, S7, S8, S9 upstream as they are pure C
-  path repairs; each one accepted removes a conflict source.
+See `Docs/UPSTREAM.md`. The base commit is recorded there and
+`Tools/sync-upstream.sh` imports upstream commits as patches limited to the
+three source directories. Upstream churn in CF is modest (190 commits in
+roughly 2.5 years, almost all small fixes), so conflicts will be rare and
+confined to the regions touched by S1-S8.
 
 ---
 
 ## 7. Roadmap
 
-Phase 0, groundwork (this document): done. Decide on section 2 items 3 and 7
-(SOVERSION, trim or not).
+Phase 0, groundwork: done.
 
-Phase 1, "it builds and links": S1-S5, S7; new root `CMakeLists.txt` with
-ICU shim, dispatch and BlocksRuntime detection, shared/static, install and
-package config; `Tests/C/smoke.c` passing on Ubuntu 24.04 (with fetched
-libdispatch) and Debian (packaged libdispatch). Acceptance: `cmake -B build &&
-cmake --build build && ctest --test-dir build` green from a clean container
-with only `clang cmake ninja libicu-dev libblocksruntime-dev` installed.
+Phase 1, "it builds and links": **implemented on this branch.** S1-S8, the
+repository trimmed to CF, the new CMake build with ICU shim, dispatch and
+BlocksRuntime detection, shared and static libraries, install rules, package
+config and pkg-config file, `Tests/C/smoke.c` and `Tests/C/headers.c`, and a
+GitHub Actions workflow.
 
-Phase 2, "it is a good citizen": S6, S8, S9, interface libraries behind
-options, pkg-config, header self-containment test, consumer tests, CI matrix
-including static, musl and sanitizers, README rewrite for C consumers.
+Verified in a clean Ubuntu 24.04 container with clang 18, ICU 74, system
+BlocksRuntime, libxml2 2.9 and curl 8.5:
+
+* shared Release build, static Release build with both interface libraries,
+  Debug build with the vendored Blocks runtime, and `CF_SWIFT_RUNTIME=ON`
+  (compile and link of the library) all build with zero warnings in CF proper;
+* the shared library's undefined symbols are only libdispatch, ICU,
+  BlocksRuntime and libc; no `uuid_*` symbol is exported;
+* install + `find_package(CoreFoundation)` from a separate project works for
+  both the shared and the static install, and a consumer TU compiles against
+  the installed headers without `-fblocks`.
+
+Not verified here: actually running the tests. The container could not build
+libdispatch (the sandbox refused to execute the external build), so the
+library was linked against a header-only stand-in and the test executables
+stop at the link step with only `dispatch_*` symbols unresolved. The CI
+workflow builds libdispatch via `CF_FETCH_LIBDISPATCH=ON` and runs `ctest`;
+its first run is the acceptance test for this phase.
+
+Phase 2, "it is a good citizen": S9, header self-containment test for every
+installed header, consumer tests (installed and FetchContent) in CI, a CI
+matrix with Debian (packaged libdispatch), Fedora, Alpine (musl), static and
+sanitizer jobs, interface-library job.
 
 Phase 3, "polish": S10 hidden visibility with an exports audit, S11 ISO8601
-restore, Windows and FreeBSD jobs, release tagging with `SOVERSION`
-discipline, `sync-upstream.sh` exercised once against upstream `main`.
+restore, Windows and FreeBSD jobs, release tagging, first upstream sync with
+`Tools/sync-upstream.sh`.
 
 ---
 
-## 8. Open questions
+## 8. Decisions taken
 
-1. Trim the repository to CF only (option B) or keep the Swift tree (A)?
-   The plan assumes B.
-2. Keep `CF_SWIFT_RUNTIME` as a compile-only option, or drop Swift mode
-   outright and accept slightly larger sync diffs?
-3. Library versioning: inherit `1338` from 5.10.1's `project(VERSION 1338)`,
-   or start at `1.0.0`?
-4. Is macOS in scope at all? If yes, as a static library with a renamed
-   install name only.
-5. Should the vendored `uuid.c` stay (S8 rename) or should CF require
-   libuuid on Linux like 5.10.1's `static-module.map` suggests (`link "uuid"`)?
+1. Repository trimmed to CF only.
+2. `CF_SWIFT_RUNTIME` kept as a compile-only option.
+3. Versioning starts at 1.0.0.
+4. macOS is out of scope.
+5. The vendored `uuid.c` stays, with hidden symbols.
+6. Nothing is sent upstream.

@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  linux:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: shared
+            cmake_args: -DBUILD_SHARED_LIBS=ON
+          - name: static
+            cmake_args: -DBUILD_SHARED_LIBS=OFF
+          - name: shared + interface libraries + vendored Blocks
+            cmake_args: -DCF_BUILD_XML_INTERFACE=ON -DCF_BUILD_URLSESSION_INTERFACE=ON -DCF_BLOCKS_RUNTIME=vendored
+            extra_packages: libxml2-dev libcurl4-openssl-dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang ninja-build cmake libicu-dev libblocksruntime-dev ${{ matrix.extra_packages }}
+
+      - name: Configure
+        # Ubuntu does not package libdispatch; build swift-corelibs-libdispatch in-tree.
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCF_FETCH_LIBDISPATCH=ON \
+            -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/prefix \
+            ${{ matrix.cmake_args }}
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Install
+        run: cmake --install build
+
+      - name: Consumer project against the installed package
+        run: |
+          mkdir -p consumer
+          cat > consumer/CMakeLists.txt <<'CMAKE'
+          cmake_minimum_required(VERSION 3.20)
+          project(cf_consumer C)
+          find_package(CoreFoundation 1.0 REQUIRED)
+          add_executable(app main.c)
+          target_link_libraries(app PRIVATE CoreFoundation::CoreFoundation)
+          CMAKE
+          cat > consumer/main.c <<'C'
+          #include <CoreFoundation/CoreFoundation.h>
+          int main(void) {
+              CFStringRef s = CFStringCreateWithFormat(NULL, NULL, CFSTR("%d bottles"), 99);
+              CFShow(s);
+              CFRelease(s);
+              return CFStringGetLength(s) == 10 ? 0 : 1;
+          }
+          C
+          cmake -S consumer -B consumer/build -G Ninja -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_PREFIX_PATH=${{ github.workspace }}/prefix
+          cmake --build consumer/build
+          LD_LIBRARY_PATH=${{ github.workspace }}/prefix/lib consumer/build/app
+
+  swift-runtime-mode-compiles:
+    name: CF_SWIFT_RUNTIME=ON still compiles
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang ninja-build cmake libicu-dev libblocksruntime-dev
+      - name: Configure and build the library only
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DCF_SWIFT_RUNTIME=ON -DCF_FETCH_LIBDISPATCH=ON -DCF_BUILD_TESTS=OFF
+          cmake --build build --target CoreFoundation

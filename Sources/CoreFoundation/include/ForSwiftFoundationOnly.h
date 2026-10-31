@@ -159,7 +159,11 @@ struct _NSDictionaryBridge {
     CFIndex (*countForObject)(CFTypeRef dictionary, CFTypeRef value);
     void (*getObjects)(CFTypeRef dictionary, CFTypeRef _Nullable *_Nullable valuebuf, CFTypeRef _Nullable *_Nullable keybuf);
     void (*__apply)(CFTypeRef dictionary, void (*applier)(CFTypeRef key, CFTypeRef value, void *context), void *context);
+#if __BLOCKS__
     void (*enumerateKeysAndObjectsWithOptions)(CFTypeRef dictionary, CFIndex options, void (^block)(const void *key, const void *value, Boolean *stop));
+#else
+    void *enumerateKeysAndObjectsWithOptions;
+#endif
     _Nonnull CFTypeRef (*_Nonnull copy)(CFTypeRef obj);
 };
 

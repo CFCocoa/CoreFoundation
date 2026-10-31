@@ -163,10 +163,10 @@ typedef struct os_log_s *os_log_t;
 #endif
 
 #include "ForFoundationOnly.h"
-#if DEPLOYMENT_RUNTIME_SWIFT
+// ForSwiftFoundationOnly.h also declares the cross-platform thread, spawn and
+// uuid helpers that CF itself uses, so it is needed in the C runtime mode too.
 #include "ForSwiftFoundationOnly.h"
 #include "CFString.h"
-#endif
 
 CF_EXPORT const char *_CFProcessName(void);
 CF_PRIVATE CFStringRef _CFProcessNameString(void);

@@ -59,23 +59,33 @@ typedef __darwin_uuid_string_t	uuid_string_t;
 extern "C" {
 #endif
 
-void uuid_clear(uuid_t uu);
+/* This is CoreFoundation's private copy of the uuid library. Keep its symbols
+ * out of the dynamic symbol table so they can never interpose a libuuid that
+ * other code in the same process links against. CFUUID.c exposes the
+ * _cf_uuid_* wrappers for external callers. */
+#if defined(_WIN32)
+#define _CF_UUID_PRIVATE
+#else
+#define _CF_UUID_PRIVATE __attribute__((__visibility__("hidden")))
+#endif
 
-int uuid_compare(const uuid_t uu1, const uuid_t uu2);
+_CF_UUID_PRIVATE void uuid_clear(uuid_t uu);
 
-void uuid_copy(uuid_t dst, const uuid_t src);
+_CF_UUID_PRIVATE int uuid_compare(const uuid_t uu1, const uuid_t uu2);
 
-void uuid_generate(uuid_t out);
-void uuid_generate_random(uuid_t out);
-void uuid_generate_time(uuid_t out);
+_CF_UUID_PRIVATE void uuid_copy(uuid_t dst, const uuid_t src);
 
-int uuid_is_null(const uuid_t uu);
+_CF_UUID_PRIVATE void uuid_generate(uuid_t out);
+_CF_UUID_PRIVATE void uuid_generate_random(uuid_t out);
+_CF_UUID_PRIVATE void uuid_generate_time(uuid_t out);
 
-int uuid_parse(const uuid_string_t in, uuid_t uu);
+_CF_UUID_PRIVATE int uuid_is_null(const uuid_t uu);
 
-void uuid_unparse(const uuid_t uu, uuid_string_t out);
-void uuid_unparse_lower(const uuid_t uu, uuid_string_t out);
-void uuid_unparse_upper(const uuid_t uu, uuid_string_t out);
+_CF_UUID_PRIVATE int uuid_parse(const uuid_string_t in, uuid_t uu);
+
+_CF_UUID_PRIVATE void uuid_unparse(const uuid_t uu, uuid_string_t out);
+_CF_UUID_PRIVATE void uuid_unparse_lower(const uuid_t uu, uuid_string_t out);
+_CF_UUID_PRIVATE void uuid_unparse_upper(const uuid_t uu, uuid_string_t out);
 
 #ifdef __cplusplus
 }

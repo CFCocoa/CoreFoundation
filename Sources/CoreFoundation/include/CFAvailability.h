@@ -7,8 +7,10 @@
 	See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 */
 
+// Standalone C build: the C runtime mode is the default. Swift Foundation
+// builds define DEPLOYMENT_RUNTIME_SWIFT=1 explicitly on the command line.
 #ifndef DEPLOYMENT_RUNTIME_SWIFT
-#define DEPLOYMENT_RUNTIME_SWIFT 1
+#define DEPLOYMENT_RUNTIME_SWIFT 0
 #endif
 
 #if !defined(__COREFOUNDATION_CFAVAILABILITY__)

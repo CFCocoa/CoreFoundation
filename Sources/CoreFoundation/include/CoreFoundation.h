@@ -72,7 +72,12 @@
 #include "CFBundle.h"
 #include "CFConstantKeys.h"
 
+// The Swift Foundation bridge declarations are only meaningful when CF is
+// built for the Swift runtime. C clients that need the cross-platform helpers
+// declared there can include "ForSwiftFoundationOnly.h" explicitly.
+#if DEPLOYMENT_RUNTIME_SWIFT
 #include "ForSwiftFoundationOnly.h"
+#endif
 
 #if TARGET_OS_OSX || TARGET_OS_IPHONE || TARGET_OS_WIN32 || TARGET_OS_LINUX || TARGET_OS_WASI || TARGET_OS_BSD
 #  if !TARGET_OS_WASI
