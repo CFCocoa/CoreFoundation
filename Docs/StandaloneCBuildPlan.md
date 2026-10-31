@@ -439,12 +439,13 @@ needs `-fno-sanitize=function` (the CI job does this).
 
 Phase 2, "it is a good citizen": **implemented on this branch.** S9 and S13;
 a generated compile check for every public header, with and without Blocks
-(`Tests/C`, part of `all` and of `ctest`); CI extended with an ASan+UBSan job,
-a FetchContent consumer job, Debian bookworm (packaged libdispatch), Fedora
-(packaged libdispatch) and Alpine/musl (fetched libdispatch, vendored Blocks)
-container jobs. Verified locally: shared, static with interface libraries,
-vendored Blocks and sanitizer configurations pass all tests, and a consumer
-that vendors CoreFoundation with FetchContent builds and runs.
+(`Tests/C`, part of `all` and of `ctest`); the posix_spawn chdir helper and
+the `fts.h` include now work on musl. CI covers, all green: Ubuntu 24.04
+shared, static, interface libraries with vendored Blocks, ASan+UBSan, a
+FetchContent consumer, Debian bookworm and trixie (packaged libdispatch where
+the release has it, fetched otherwise), Fedora (packaged libdispatch, vendored
+Blocks), Alpine/musl (packaged libdispatch), and the Swift-mode compile check.
+Each job also builds and runs a consumer against the installed package.
 
 Phase 3, "polish": S10 hidden visibility with an exports audit, S11 ISO8601
 restore, Windows and FreeBSD jobs, release tagging, first upstream sync with
